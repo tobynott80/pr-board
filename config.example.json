@@ -1,0 +1,12 @@
+{
+  "orgs": ["your-github-org"],
+  "sites": {
+    "https://your-company.atlassian.net": {
+      "email": "",
+      "token": ""
+    }
+  },
+  "projects": {
+    "ABC": "https://your-company.atlassian.net"
+  }
+}

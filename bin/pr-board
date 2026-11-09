@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+umask 077
+
+resolve_link() {
+  local path="$1"
+  while [ -L "$path" ]; do
+    path="$(readlink "$path")"
+  done
+  echo "$path"
+}
+
+ROOT="$(cd "$(dirname "$(resolve_link "$0")")/.." && pwd)"
+PORT="${PR_BOARD_PORT:-8765}"
+URL="http://localhost:$PORT"
+STATE_DIR="$HOME/.local/state"
+LOG="$STATE_DIR/pr-board.log"
+PIDFILE="$STATE_DIR/pr-board.pid"
+SERVER_ARGS="-u $ROOT/server.py "
+
+is_up() { curl -sf -m 2 "$URL" | grep -q "<title>PR Board</title>"; }
+
+is_our_server() { ps -p "$1" -o command= | grep -qF -- "$SERVER_ARGS"; }
+
+start_server() {
+  mkdir -p "$STATE_DIR"
+  nohup python3 -u "$ROOT/server.py" "$PORT" >"$LOG" 2>&1 < /dev/null &
+  echo $! > "$PIDFILE"
+  disown
+  for _ in $(seq 20); do
+    is_up && return 0
+    sleep 0.25
+  done
+  echo "pr board failed to start, see $LOG" >&2
+  cat "$LOG" >&2
+  exit 1
+}
+
+stop_server() {
+  [ -f "$PIDFILE" ] || return 0
+  local pid
+  pid="$(cat "$PIDFILE")"
+  is_our_server "$pid" && kill "$pid"
+  rm -f "$PIDFILE"
+  sleep 0.5
+}
+
+open_browser() {
+  if [ "$(uname)" = "Darwin" ]; then
+    open "$URL"
+    return
+  fi
+  xdg-open "$URL" >/dev/null 2>&1 &
+}
+
+if [ "$1" = "restart" ]; then
+  stop_server
+fi
+
+is_up || start_server
+open_browser
+echo "$URL"

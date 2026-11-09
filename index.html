@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Board</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+  --green: #1a7f37; --green-bg: #dcfce7; --red: #b42318; --red-bg: #fee4e2;
+  --amber: #9a6700; --amber-bg: #fff4d6; --blue: #1f5fbf; --blue-bg: #e0ecff;
+  --grey-bg: #eef0f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --card: #171b21; --text: #e6e8eb; --muted: #8b939e; --line: #262c34;
+    --green: #4ade80; --green-bg: #12301f; --red: #f87171; --red-bg: #3a1717;
+    --amber: #fbbf24; --amber-bg: #352a0c; --blue: #7aa7ff; --blue-bg: #16264a;
+    --grey-bg: #222831;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+header { position: sticky; top: 0; z-index: 1; background: var(--bg); border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+h1 { font-size: 17px; margin: 0 8px 0 0; }
+.meta { color: var(--muted); font-size: 12px; }
+.spacer { flex: 1; }
+button, label.toggle { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
+.filters button.active { outline: 2px solid var(--blue); }
+main { padding: 8px 20px 40px; }
+.section { margin-top: 18px; }
+.section h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.section h2 a { color: var(--text); text-decoration: none; }
+.section h2 a:hover { text-decoration: underline; }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); align-items: start; }
+@media (max-width: 520px) { main { padding: 8px 16px 40px; } .grid { grid-template-columns: 1fr; } }
+.notice { margin: 12px 20px 0; padding: 8px 12px; border-radius: 6px; font-size: 13px; background: var(--amber-bg); color: var(--amber); }
+.notice.hidden { display: none; }
+button.move { margin-left: auto; font-size: 11.5px; padding: 0 8px; color: var(--muted); border-color: transparent; background: transparent; }
+li:hover button.move { border-color: var(--line); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.card-head { display: flex; gap: 10px; align-items: baseline; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.card-head a.ticket { font-weight: 600; color: var(--text); text-decoration: none; white-space: nowrap; }
+.card-head a.ticket:hover { text-decoration: underline; }
+.card-title { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.done { border-color: var(--green); }
+ul { list-style: none; margin: 0; padding: 0; }
+li { padding: 9px 14px; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+li:first-child { border-top: 0; }
+li.merged { opacity: .55; }
+.pr-line { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.pr-line a { color: var(--text); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.pr-line a:hover { text-decoration: underline; }
+.pr-title { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--grey-bg); color: var(--muted); white-space: nowrap; }
+.chip.green { background: var(--green-bg); color: var(--green); }
+.chip.red { background: var(--red-bg); color: var(--red); }
+.chip.amber { background: var(--amber-bg); color: var(--amber); }
+.chip.blue { background: var(--blue-bg); color: var(--blue); }
+.empty, .error { padding: 40px 20px; color: var(--muted); }
+.error { color: var(--red); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PR Board</h1>
+  <span class="meta" id="meta">loading…</span>
+  <span class="spacer"></span>
+  <label class="toggle"><input type="checkbox" id="auto-refresh"> auto refresh every 5 min</label>
+  <label class="toggle"><input type="checkbox" id="show-stale"> show stale (over a year old)</label>
+  <button id="refresh">Refresh</button>
+</header>
+<div class="notice hidden" id="notice"></div>
+<div class="filters" id="filters"></div>
+<main id="board"></main>
+<script>
+const FLAGS = {
+  ready: {label: 'ready to merge', tone: 'green'},
+  approved: {label: 'approved', tone: 'green'},
+  merged: {label: 'merged', tone: 'green'},
+  reapprove: {label: 're-approve', tone: 'amber'},
+  review: {label: 'needs review', tone: 'blue'},
+  changes: {label: 'changes requested', tone: 'red'},
+  conflicts: {label: 'conflicts', tone: 'red'},
+  ci_failing: {label: 'CI failing', tone: 'red'},
+  behind: {label: 'behind base', tone: 'amber'},
+  ci_running: {label: 'CI running', tone: 'grey'},
+  checking: {label: 'checking mergeability', tone: 'grey'},
+  draft: {label: 'draft', tone: 'grey'},
+};
+const JIRA_TONES = {done: 'green', indeterminate: 'blue', new: 'grey'};
+const FILTERS = ['ready', 'reapprove', 'review', 'conflicts', 'behind', 'ci_failing', 'draft'];
+const NO_TICKET = 'no ticket';
+const OTHER_SECTION = 'other';
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+const AUTO_REFRESH_KEY = 'pr-board-auto-refresh';
+const CONFIG_HINT = 'no jira data, add your api tokens to ~/.config/pr-board/config.json';
+
+let board = null;
+let activeFilter = null;
+let loading = false;
+
+const el = (tag, attrs = {}, children = []) => {
+  const node = Object.assign(document.createElement(tag), attrs);
+  node.append(...children);
+  return node;
+};
+
+const showStale = () => document.getElementById('show-stale').checked;
+const autoRefresh = () => document.getElementById('auto-refresh').checked;
+const isMerged = pr => pr.flags.includes('merged');
+const isVisible = pr => showStale() || !pr.stale;
+const openPrs = ticket => ticket.prs.filter(pr => !isMerged(pr) && isVisible(pr));
+const getVisiblePrs = ticket => ticket.prs.filter(pr => isVisible(pr) && !(ticket.ticket === NO_TICKET && isMerged(pr)));
+const isDone = ticket => ticket.ticket !== NO_TICKET && openPrs(ticket).length === 0;
+const isJiraDone = ticket => ticket.jira?.statusCategory === 'done';
+
+const getTicketTitle = ticket => {
+  if (ticket.jira) {
+    return ticket.jira.summary;
+  }
+  const title = ticket.prs[0].title.replace(ticket.ticket, '').replace(/^[\s:\-]+/, '');
+  return title || ticket.prs[0].title;
+};
+
+const getFlagLabel = (flag, pr) => {
+  if (flag === 'reapprove' && pr.dismissed.length) {
+    return `re-approve: ${pr.dismissed.join(', ')}`;
+  }
+  return FLAGS[flag].label;
+};
+
+const chip = (text, tone = '') => el('span', {className: `chip ${tone}`, textContent: text});
+
+const renderLink = (text, url, className = '') => {
+  if (!url) {
+    return el('span', {className, textContent: text});
+  }
+  return el('a', {className, href: url, target: '_blank', textContent: text});
+};
+
+const moveToTicket = async pr => {
+  const ticket = prompt(`Ticket for ${pr.id} (leave blank to go back to the automatic one)`, '');
+  if (ticket === null) {
+    return;
+  }
+  const response = await fetch('/api/assign', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({pr: pr.id, ticket: ticket.trim().toUpperCase()}),
+  });
+  if (!response.ok) {
+    alert((await response.json()).error);
+    return;
+  }
+  load();
+};
+
+const renderPr = pr => el('li', {className: isMerged(pr) ? 'merged' : ''}, [
+  el('div', {className: 'pr-line'}, [
+    renderLink(`${pr.repo}#${pr.number}`, pr.url),
+    el('span', {className: 'pr-title', textContent: pr.title, title: pr.title}),
+    el('button', {className: 'move', textContent: 'move', title: 'move to another ticket', onclick: () => moveToTicket(pr)}),
+  ]),
+  el('div', {className: 'chips'}, pr.flags.map(flag => chip(getFlagLabel(flag, pr), FLAGS[flag].tone))),
+]);
+
+const renderProgressChip = ticket => {
+  if (isDone(ticket) && isJiraDone(ticket)) {
+    return chip('all merged');
+  }
+  if (isDone(ticket)) {
+    return chip('ready for test', 'green');
+  }
+  const waiting = openPrs(ticket).length;
+  return chip(`waiting on ${waiting} PR${waiting === 1 ? '' : 's'}`);
+};
+
+const renderJiraChip = ticket => {
+  if (!ticket.jira) {
+    return '';
+  }
+  return chip(ticket.jira.status, JIRA_TONES[ticket.jira.statusCategory]);
+};
+
+const renderTicket = ticket => el('section', {className: `card ${isDone(ticket) && !isJiraDone(ticket) ? 'done' : ''}`}, [
+  el('div', {className: 'card-head'}, [
+    renderLink(ticket.ticket, ticket.url, 'ticket'),
+    el('span', {className: 'card-title', textContent: getTicketTitle(ticket), title: getTicketTitle(ticket)}),
+    renderJiraChip(ticket),
+    renderProgressChip(ticket),
+  ]),
+  el('ul', {}, getVisiblePrs(ticket).map(renderPr)),
+]);
+
+const matchesFilter = ticket => !activeFilter || openPrs(ticket).some(pr => pr.flags.includes(activeFilter));
+
+const getSortKey = ticket => {
+  if (ticket.ticket === NO_TICKET) {
+    return 1000;
+  }
+  return openPrs(ticket).length;
+};
+
+const getVisibleTickets = () => board.tickets
+  .filter(ticket => getVisiblePrs(ticket).length)
+  .filter(matchesFilter)
+  .sort((a, b) => getSortKey(a) - getSortKey(b));
+
+const groupByRoot = tickets => {
+  const groups = new Map();
+  tickets.forEach(ticket => groups.set(ticket.root, [...(groups.get(ticket.root) ?? []), ticket]));
+  return groups;
+};
+
+const isEpicGroup = (root, tickets) => tickets.length > 1 || tickets[0].ticket !== root;
+
+const getSections = tickets => {
+  const sections = [];
+  const other = [];
+  groupByRoot(tickets).forEach((group, root) => {
+    if (root === NO_TICKET || !isEpicGroup(root, group)) {
+      other.push(...group);
+      return;
+    }
+    sections.push({root, tickets: group});
+  });
+  return [...sections, {root: OTHER_SECTION, tickets: other}].filter(section => section.tickets.length);
+};
+
+const renderSectionTitle = section => {
+  if (section.root === OTHER_SECTION) {
+    return el('h2', {textContent: 'Other tickets'});
+  }
+  const sample = section.tickets[0];
+  return el('h2', {}, [renderLink(section.root, sample.rootUrl), sample.rootSummary ?? '']);
+};
+
+const renderSection = section => el('div', {className: 'section'}, [
+  renderSectionTitle(section),
+  el('div', {className: 'grid'}, section.tickets.map(renderTicket)),
+]);
+
+const countFlag = flag => board.tickets.flatMap(openPrs).filter(pr => pr.flags.includes(flag)).length;
+
+const renderFilters = () => {
+  const buttons = FILTERS.map(flag => el('button', {
+    className: activeFilter === flag ? 'active' : '',
+    textContent: `${FLAGS[flag].label} (${countFlag(flag)})`,
+    onclick: () => { activeFilter = activeFilter === flag ? null : flag; render(); },
+  }));
+  document.getElementById('filters').replaceChildren(...buttons);
+};
+
+const getNotice = () => {
+  if (board.jiraError) {
+    return board.jiraError;
+  }
+  if (!board.tickets.some(ticket => ticket.jira)) {
+    return CONFIG_HINT;
+  }
+  return '';
+};
+
+const renderNotice = () => {
+  const notice = document.getElementById('notice');
+  notice.textContent = getNotice();
+  notice.classList.toggle('hidden', !notice.textContent);
+};
+
+const renderMeta = () => {
+  const open = board.tickets.flatMap(openPrs).length;
+  const time = new Date(board.generatedAt).toLocaleTimeString();
+  document.getElementById('meta').textContent = `${open} open · merged from the last ${board.mergedLookbackDays} days shown · updated ${time}`;
+};
+
+const render = () => {
+  renderMeta();
+  renderNotice();
+  renderFilters();
+  const tickets = getVisibleTickets();
+  const target = document.getElementById('board');
+  if (!tickets.length) {
+    target.replaceChildren(el('div', {className: 'empty', textContent: 'nothing here'}));
+    return;
+  }
+  target.replaceChildren(...getSections(tickets).map(renderSection));
+};
+
+const renderError = message => {
+  document.getElementById('meta').textContent = 'failed to load';
+  document.getElementById('board').replaceChildren(el('div', {className: 'error', textContent: message}));
+};
+
+const getReadyPrIds = data => new Set(data.tickets.flatMap(t => t.prs).filter(pr => pr.flags.includes('ready')).map(pr => pr.id));
+const getReadyForTest = data => new Set(data.tickets.filter(t => isDone(t) && !isJiraDone(t)).map(t => t.ticket));
+
+const notify = (title, body) => {
+  if (Notification.permission !== 'granted') {
+    return;
+  }
+  new Notification(title, {body});
+};
+
+const notifyChanges = (previous, next) => {
+  const wasReady = getReadyPrIds(previous);
+  [...getReadyPrIds(next)].filter(id => !wasReady.has(id)).forEach(id => notify('Ready to merge', id));
+  const wasDone = getReadyForTest(previous);
+  [...getReadyForTest(next)].filter(key => !wasDone.has(key)).forEach(key => notify('Ready for test', key));
+};
+
+const requestNotifications = () => {
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+};
+
+const setLoading = value => {
+  loading = value;
+  const button = document.getElementById('refresh');
+  button.disabled = value;
+  button.textContent = value ? 'Loading…' : 'Refresh';
+};
+
+const load = async () => {
+  setLoading(true);
+  const response = await fetch('/api/board');
+  const body = await response.json();
+  setLoading(false);
+  if (!response.ok) {
+    renderError(body.error);
+    return;
+  }
+  if (board) {
+    notifyChanges(board, body);
+  }
+  board = body;
+  render();
+};
+
+const tick = () => {
+  if (!autoRefresh() || loading) {
+    return;
+  }
+  load();
+};
+
+const initAutoRefresh = () => {
+  const toggle = document.getElementById('auto-refresh');
+  toggle.checked = localStorage.getItem(AUTO_REFRESH_KEY) !== 'off';
+  toggle.onchange = () => {
+    localStorage.setItem(AUTO_REFRESH_KEY, toggle.checked ? 'on' : 'off');
+    requestNotifications();
+  };
+  setInterval(tick, AUTO_REFRESH_MS);
+};
+
+document.getElementById('refresh').onclick = () => { requestNotifications(); load(); };
+document.getElementById('show-stale').onchange = render;
+initAutoRefresh();
+load();
+</script>
+</body>
+</html>

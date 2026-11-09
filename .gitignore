@@ -1,0 +1,4 @@
+__pycache__/
+config.json
+overrides.json
+.idea/
