@@ -29,6 +29,13 @@ button, label.toggle { font: inherit; font-size: 13px; border: 1px solid var(--l
 button:disabled { opacity: .6; cursor: wait; }
 .filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
 .filters button.active { outline: 2px solid var(--blue); }
+.status-filter { position: relative; }
+.status-filter summary { list-style: none; font-size: 13px; border: 1px solid var(--line); background: var(--card); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.status-filter summary::-webkit-details-marker { display: none; }
+.status-filter.active summary { outline: 2px solid var(--blue); }
+.status-menu { position: absolute; z-index: 2; top: calc(100% + 4px); left: 0; min-width: 220px; max-height: 60vh; overflow-y: auto; display: grid; gap: 2px; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .15); }
+.status-option { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 4px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.status-option:hover { background: var(--grey-bg); }
 main { padding: 8px 20px 40px; }
 .section { margin-top: 18px; }
 .section h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
@@ -97,10 +104,13 @@ const NO_TICKET = 'no ticket';
 const OTHER_SECTION = 'other';
 const AUTO_REFRESH_MS = 5 * 60 * 1000;
 const AUTO_REFRESH_KEY = 'pr-board-auto-refresh';
+const SHOWN_STATUSES_KEY = 'pr-board-shown-statuses';
 const CONFIG_HINT = 'no jira data, add your api tokens to ~/.config/pr-board/config.json';
 
 let board = null;
 let activeFilter = null;
+let shownStatuses = new Set(JSON.parse(localStorage.getItem(SHOWN_STATUSES_KEY) ?? '[]'));
+let statusMenuOpen = false;
 let loading = false;
 
 const el = (tag, attrs = {}, children = []) => {
@@ -197,6 +207,7 @@ const renderTicket = ticket => el('section', {className: `card ${isDone(ticket) 
 ]);
 
 const matchesFilter = ticket => !activeFilter || openPrs(ticket).some(pr => pr.flags.includes(activeFilter));
+const matchesStatus = ticket => !shownStatuses.size || !ticket.jira || shownStatuses.has(ticket.jira.status);
 
 const getSortKey = ticket => {
   if (ticket.ticket === NO_TICKET) {
@@ -208,6 +219,7 @@ const getSortKey = ticket => {
 const getVisibleTickets = () => board.tickets
   .filter(ticket => getVisiblePrs(ticket).length)
   .filter(matchesFilter)
+  .filter(matchesStatus)
   .sort((a, b) => getSortKey(a) - getSortKey(b));
 
 const groupByRoot = tickets => {
@@ -252,7 +264,58 @@ const renderFilters = () => {
     textContent: `${FLAGS[flag].label} (${countFlag(flag)})`,
     onclick: () => { activeFilter = activeFilter === flag ? null : flag; render(); },
   }));
-  document.getElementById('filters').replaceChildren(...buttons);
+  document.getElementById('filters').replaceChildren(...buttons, ...renderStatusFilter());
+};
+
+const getStatusCounts = () => {
+  const counts = new Map([...shownStatuses].map(status => [status, 0]));
+  board.tickets
+    .filter(ticket => ticket.jira && getVisiblePrs(ticket).length)
+    .forEach(ticket => counts.set(ticket.jira.status, (counts.get(ticket.jira.status) ?? 0) + 1));
+  return [...counts].sort(([a], [b]) => a.localeCompare(b));
+};
+
+const saveShownStatuses = () => {
+  localStorage.setItem(SHOWN_STATUSES_KEY, JSON.stringify([...shownStatuses]));
+  render();
+};
+
+const toggleStatus = status => {
+  shownStatuses.has(status) ? shownStatuses.delete(status) : shownStatuses.add(status);
+  saveShownStatuses();
+};
+
+const clearStatuses = () => {
+  shownStatuses.clear();
+  saveShownStatuses();
+};
+
+const renderStatusOption = ([status, count]) => el('label', {className: 'status-option'}, [
+  el('input', {type: 'checkbox', checked: shownStatuses.has(status), onchange: () => toggleStatus(status)}),
+  `${status} (${count})`,
+]);
+
+const renderStatusFilter = () => {
+  const counts = getStatusCounts();
+  if (!counts.length) {
+    return [];
+  }
+  const clear = shownStatuses.size ? [el('button', {textContent: 'clear', onclick: clearStatuses})] : [];
+  return [el('details', {
+    className: `status-filter ${shownStatuses.size ? 'active' : ''}`,
+    open: statusMenuOpen,
+    ontoggle: event => { statusMenuOpen = event.target.open; },
+  }, [
+    el('summary', {textContent: shownStatuses.size ? `statuses (${shownStatuses.size} shown)` : 'statuses'}),
+    el('div', {className: 'status-menu'}, [...counts.map(renderStatusOption), ...clear]),
+  ])];
+};
+
+const closeStatusMenuOnOutsideClick = event => {
+  const menu = document.querySelector('.status-filter');
+  if (menu?.open && !event.target.closest('.status-filter')) {
+    menu.open = false;
+  }
 };
 
 const getNotice = () => {
@@ -360,6 +423,7 @@ const initAutoRefresh = () => {
 
 document.getElementById('refresh').onclick = () => { requestNotifications(); load(); };
 document.getElementById('show-stale').onchange = render;
+document.addEventListener('click', closeStatusMenuOnOutsideClick);
 initAutoRefresh();
 load();
 </script>

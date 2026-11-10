@@ -19,7 +19,7 @@ It runs on your machine as a small Python server with no dependencies. GitHub da
 - The Jira summary and status on each card
 - Highlighted cards where every PR has merged but the Jira ticket isn't done yet, so you know it's ready to move on
 
-At the top you can filter by flag, hide or show stale PRs (opened over a year ago, hidden by default) and turn auto refresh on or off. Auto refresh reloads every 5 minutes. With it on, the browser sends a notification when a PR becomes ready to merge or a ticket's PRs have all merged.
+At the top you can filter by flag, pick which Jira statuses to show (the list is built from the statuses on your tickets, and your choice is remembered), hide or show stale PRs (opened over a year ago, hidden by default) and turn auto refresh on or off. Auto refresh reloads every 5 minutes. With it on, the browser sends a notification when a PR becomes ready to merge or a ticket's PRs have all merged.
 
 ## Requirements
 
